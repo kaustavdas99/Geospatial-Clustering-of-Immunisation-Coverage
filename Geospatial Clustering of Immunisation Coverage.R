@@ -1,12 +1,6 @@
-# ===================================================
-# FULL CLEANED SCRIPT: WEST BENGAL IMMUNISATION INDEX
-# ===================================================
-
 # -----------------------------
-# 0. Install / load packages
+# Install / load packages
 # -----------------------------
-# install.packages(c("sf","dplyr","readxl","spdep","tmap","RColorBrewer","terra"))
-
 library(sf)
 library(dplyr)
 library(readxl)
@@ -16,7 +10,7 @@ library(RColorBrewer)
 library(terra)
 
 # -----------------------------
-# 1. Read shapefile and filter West Bengal
+# Read shapefile and filter West Bengal
 # -----------------------------
 wb_shp <- st_read("District_shape_West_Bengal.shp")
 
@@ -27,7 +21,7 @@ wb_shp <- st_read("District_shape_West_Bengal.shp")
 print(unique(wb_shp$NAME))
 
 # -----------------------------
-# 2. Read immunisation index Excel
+# Read immunisation index Excel
 # -----------------------------
 immun <- read_excel("District_Cumulative_Immunisation_Risk.xlsx")
 
@@ -35,10 +29,7 @@ immun <- read_excel("District_Cumulative_Immunisation_Risk.xlsx")
 immun <- immun %>% rename(Average_Index = `Average_Index`)
 
 # -----------------------------
-# 3. Map Excel districts to shapefile districts
-# -----------------------------
-# -----------------------------
-# 2. District name mapping and category aggregation
+# District name mapping and category aggregation
 # -----------------------------
 district_map <- c(
   "Alipurduar" = "Alipurduar",
@@ -66,20 +57,19 @@ district_map <- c(
   "Uttar Dinajpur" = "Uttar Dinajpur"
 )
 
-
 # Apply mapping
 immun <- immun %>%
   mutate(DISTRICT_2011 = district_map[District])
 
 # -----------------------------
-# 4. Aggregate duplicates
+# Aggregate duplicates
 # -----------------------------
 immun_agg <- immun %>%
   group_by(DISTRICT_2011) %>%
   summarise(Immunisation_Index = mean(Average_Index, na.rm = TRUE))
 
 # -----------------------------
-# 5. Merge aggregated index into shapefile
+# Merge aggregated index into shapefile
 # -----------------------------
 wb_data <- wb_shp %>%
   left_join(immun_agg, by = c("NAME" = "DISTRICT_2011"))
@@ -87,28 +77,28 @@ wb_data <- wb_shp %>%
 # Convert to numeric
 wb_data$Immunisation_Index <- as.numeric(wb_data$Immunisation_Index)
 
-# Initialize LISA and Gi* columns
+# LISA and Gi* columns
 wb_data$LISA_cluster <- NA
 wb_data$GiZ <- NA
 
-# Check merge
+# Merge
 wb_data %>% st_drop_geometry() %>% select(NAME, Immunisation_Index)
 
 # -----------------------------
-# 6. Create neighbors
+# Create neighbors
 # -----------------------------
 nb <- poly2nb(wb_data)
 lw <- nb2listw(nb, style = "W")
 
 # -----------------------------
-# 7. Global Moran's I
+# Global Moran's I
 # -----------------------------
 index_values <- wb_data$Immunisation_Index
 global_moran <- moran.test(index_values, lw, na.action = na.omit)
 print(global_moran)
 
 # -----------------------------
-# 8. Local Moran's I (LISA)
+# Local Moran's I (LISA)
 # -----------------------------
 non_na_idx <- !is.na(index_values)
 wb_data_sub <- wb_data[non_na_idx, ]
@@ -118,7 +108,7 @@ lw_sub <- nb2listw(nb_sub, style = "W")
 
 local_moran <- localmoran(wb_data_sub$Immunisation_Index, lw_sub)
 
-# Add results
+# Results
 wb_data_sub$Ii <- local_moran[,1]
 wb_data_sub$Z_Ii <- local_moran[,4]
 wb_data_sub$Ii_p <- local_moran[,5]
@@ -132,47 +122,47 @@ wb_data_sub$LISA_cluster <- factor(
   levels = c("High-High","Low-Low","High-Low","Low-High")
 )
 
-# Fill into main shapefile
+# Fill shapefile
 wb_data$LISA_cluster[non_na_idx] <- wb_data_sub$LISA_cluster
 
 # -----------------------------
-# 9. Getis-Ord Gi* Hotspot/Coldspot
+# Getis-Ord Gi* Hotspot/Coldspot
 # -----------------------------
 gi_star <- localG(wb_data_sub$Immunisation_Index, lw_sub)
 wb_data_sub$GiZ <- as.numeric(gi_star)
 
 wb_data$GiZ[non_na_idx] <- wb_data_sub$GiZ
 
+#####################################################################################
+#library(spdep)
 
-library(spdep)
-
-# 1. Subset districts with non-missing index
+# Subset districts with non-missing index
 non_na_idx <- !is.na(wb_data$Immunisation_Index)
 wb_data_sub <- wb_data[non_na_idx, ]
 
-# 2. Create neighbor list and spatial weights
+# Create neighbor list and spatial weights
 nb_sub <- poly2nb(wb_data_sub)
 lw_sub <- nb2listw(nb_sub, style = "W")
 
-# 3. Compute Getis-Ord Gi* Z-scores
+# Compute Getis-Ord Gi* Z-scores
 gi_star <- localG(wb_data_sub$Immunisation_Index, lw_sub)
 
-# 4. Add to spatial data
+# Add to spatial data
 wb_data_sub$GiZ <- as.numeric(gi_star)
 wb_data$GiZ[non_na_idx] <- wb_data_sub$GiZ
 
 
-###########################################################################################
+########################################################################################
 #GI_TABLE
 
 library(dplyr)
 library(writexl)
 
-# 1. Subset non-NA districts
+# Subset non-NA districts
 non_na_idx <- !is.na(wb_data$Immunisation_Index)
 wb_data_sub <- wb_data[non_na_idx, ]
 
-# 2. Create significance column based on Gi* Z-score
+# Create significance column based on Gi* Z-score
 wb_data_sub <- wb_data_sub %>%
   mutate(GiSig = case_when(
     GiZ > 2.58  ~ "Hotspot (p<0.01)",
@@ -182,52 +172,49 @@ wb_data_sub <- wb_data_sub %>%
     TRUE        ~ "Not significant"
   ))
 
-# 3. Select columns to include in the table
+# Select columns to include in the table
 gi_table <- wb_data_sub %>%
-  st_drop_geometry() %>%  # remove geometry for Excel
+  st_drop_geometry() %>% 
   select(NAME, Immunisation_Index, GiZ, GiSig) %>%
-  arrange(desc(GiZ))  # optional: sort by Z-score
-
-# 4. View the table
+  arrange(desc(GiZ)) 
 print(gi_table)
 
-# 5. Save to Excel
 write_xlsx(gi_table, "WestBengal_Gi_Values_Table.xlsx")
 
-###############################################################################################
+##########################################################################################
 #LISA TABLE
 
-library(spdep)
-library(dplyr)
-library(sf)
-library(writexl)
+#library(spdep)
+#library(dplyr)
+#library(sf)
+#library(writexl)
 
 # ---------------------------------
-# 1. Subset non-missing districts
+# Subset non-missing districts
 # ---------------------------------
 non_na_idx <- !is.na(wb_data$Immunisation_Index)
 wb_data_sub <- wb_data[non_na_idx, ]
 
 # ---------------------------------
-# 2. Neighbours & weights
+# Neighbours & weights
 # ---------------------------------
 nb_sub <- poly2nb(wb_data_sub)
 lw_sub <- nb2listw(nb_sub, style = "W")
 
 # ---------------------------------
-# 3. Local Moran’s I (LISA)
+# Local Moran’s I (LISA)
 # ---------------------------------
 local_moran <- localmoran(wb_data_sub$Immunisation_Index, lw_sub)
 
 # ---------------------------------
-# 4. Add LISA results to spatial data
+# Add LISA results to spatial data
 # ---------------------------------
-wb_data_sub$Ii   <- local_moran[, 1]   # Local Moran's I
-wb_data_sub$Z_Ii <- local_moran[, 4]   # Z-score
-wb_data_sub$Ii_p <- local_moran[, 5]   # p-value
+wb_data_sub$Ii   <- local_moran[, 1] 
+wb_data_sub$Z_Ii <- local_moran[, 4] 
+wb_data_sub$Ii_p <- local_moran[, 5] 
 
 # ---------------------------------
-# 5. LISA cluster classification
+# LISA cluster classification
 # ---------------------------------
 mean_index <- mean(wb_data_sub$Immunisation_Index)
 
@@ -240,7 +227,7 @@ wb_data_sub$LISA_cluster <- factor(
 )
 
 # ---------------------------------
-# 6. LISA significance labels
+# LISA significance labels
 # ---------------------------------
 wb_data_sub$LISA_Sig <- case_when(
   wb_data_sub$Z_Ii >  2.58 ~ "Significant (p<0.01)",
@@ -251,7 +238,7 @@ wb_data_sub$LISA_Sig <- case_when(
 )
 
 # ---------------------------------
-# 7. Create LISA table
+# Create LISA table
 # ---------------------------------
 lisa_table <- wb_data_sub %>%
   st_drop_geometry() %>%
@@ -266,24 +253,19 @@ lisa_table <- wb_data_sub %>%
   ) %>%
   arrange(desc(Z_Ii))
 
-# ---------------------------------
-# 8. View & save
-# ---------------------------------
 print(lisa_table)
 
 write_xlsx(lisa_table, "WestBengal_LISA_Values_Table.xlsx")
 
-########################################################################################################
+##############################################################################################
 
-##PLOTS
-
+#PLOTS
 
 # -----------------------------
-# 10. Plot maps with tmap
+# Plot maps with tmap
 # -----------------------------
-tmap_mode("plot")  # static
+tmap_mode("plot") 
 
-# Choropleth
 tm_shape(wb_data) +
   tm_polygons("Immunisation_Index", palette = "YlGnBu",
               style = "quantile", title = "Immunisation Index") +
@@ -308,10 +290,10 @@ tmap_mode("plot")
 
 tm_shape(wb_data) +
   tm_polygons(
-    col = "Immunisation_Index",     # ONLY index controls color
+    col = "Immunisation_Index",     
     palette = "YlGnBu",
-    style = "quantile",              # or "pretty" / "fixed"
-    n = 5,                            # number of classes
+    style = "quantile",              
+    n = 5,                           
     title = "Immunisation Index",
     border.col = "grey40",
     lwd = 0.6
@@ -336,17 +318,17 @@ tm_shape(wb_data) +
 tmap_mode("plot")  # static map
 
 tm_shape(wb_data) +
-  # 1. Base polygons colored by Immunisation Index
+  # Base polygons colored by Immunisation Index
   tm_polygons(
     col = "Immunisation_Index",
     palette = "YlGnBu",
     style = "quantile",
     title = "Immunisation Index",
-    border.col = "grey50",   # district borders
+    border.col = "grey50",   
     lwd = 0.5
   ) +
-  # 2. Overlay LISA clusters
-  tm_borders(lwd = 0.5, col = "black") +  # optional for clarity
+  # Overlay LISA clusters
+  tm_borders(lwd = 0.5, col = "black") +  
   tm_shape(wb_data) +
   tm_polygons(
     col = "LISA_cluster",
@@ -354,7 +336,7 @@ tm_shape(wb_data) +
     alpha = 0.3,
     title = "LISA Cluster"
   ) +
-  # 3. Gi* hotspots/coldspots overlay (semi-transparent)
+  # Gi* hotspots/coldspots overlay
   tm_shape(wb_data) +
   tm_polygons(
     col = "GiZ",
@@ -364,14 +346,14 @@ tm_shape(wb_data) +
     alpha = 0.4,
     title = "Gi* Z-score"
   ) +
-  # 4. District labels
+  # District labels
   tm_text(
     text = "NAME",
     size = 0.6,
     col = "black",
     shadow = TRUE
   ) +
-  # 5. Layout and title
+  # Layout and title
   tm_layout(
     main.title = "West Bengal: Immunisation Index with LISA & Gi* Hotspots",
     legend.outside = TRUE,
@@ -383,17 +365,17 @@ tm_shape(wb_data) +
 
 library(tmap)
 
-# Ensure we are in static plotting mode
+# Static plotting
 tmap_mode("plot")
 
-# Simple choropleth map
+# Choropleth map
 tm_shape(wb_data) +
   tm_polygons(
-    col = "Immunisation_Index",    # variable to color districts
-    palette = "YlGnBu",            # Yellow → Green → Blue
-    style = "quantile",             # color by quantiles
+    col = "Immunisation_Index",    
+    palette = "YlGnBu",            
+    style = "quantile",             
     title = "Immunisation Index",
-    border.col = "grey40",          # district borders
+    border.col = "grey40",          
     lwd = 0.5
   ) +
   tm_text(
@@ -429,7 +411,7 @@ tm_shape(wb_data) +
   )
 
 # -----------------------------
-# 3. Gi* Hotspot / Coldspot Map
+# Gi* Hotspot / Coldspot Map
 # -----------------------------
 tm_shape(wb_data) +
   tm_polygons(
@@ -455,18 +437,18 @@ tm_shape(wb_data) +
     frame = FALSE
   )
 
-#######################################################################################################################
+##################################################################################################
 # Separate Files for Rural Urban Public and Private
 
 library(readxl)
 library(writexl)
 library(dplyr)
 
-# Read the original file
+# Read
 immun <- read_excel("6B.District_Average_Immunisation_Index_By_Category.xlsx")
 
 # -----------------------------
-# 1. CREATE RURAL INDEX FILE
+# CREATE RURAL INDEX FILE
 # -----------------------------
 rural_data <- immun %>% 
   filter(Category == "Rural") %>% 
@@ -474,10 +456,10 @@ rural_data <- immun %>%
   arrange(District)
 
 write_xlsx(rural_data, "Rural_Immunisation_Index.xlsx")
-print(paste("✅ Rural records:", nrow(rural_data)))
+print(paste("Rural records:", nrow(rural_data)))
 
 # -----------------------------
-# 2. CREATE URBAN INDEX FILE
+# CREATE URBAN INDEX FILE
 # -----------------------------
 urban_data <- immun %>% 
   filter(Category == "Urban") %>% 
@@ -485,7 +467,7 @@ urban_data <- immun %>%
   arrange(District)
 
 write_xlsx(urban_data, "Urban_Immunisation_Index.xlsx")
-print(paste("✅ Urban records:", nrow(urban_data)))
+print(paste("Urban records:", nrow(urban_data)))
 
 
 # ===================================================
@@ -496,58 +478,46 @@ library(readxl)
 library(writexl)
 library(dplyr)
 
-# Read the original file
+# Read
 immun <- read_excel("6B.District_Average_Immunisation_Index_By_Category.xlsx")
 
-# 1. CREATE PUBLIC FACILITY FILE - CORRECT CATEGORY NAME
+# CREATE PUBLIC FACILITY FILE
 public_data <- immun %>% 
-  filter(Category == "Public_Facility") %>%  # ← FIXED: underscore!
+  filter(Category == "Public_Facility") %>%  
   select(District, Category, Index) %>%
   arrange(District)
 
 write_xlsx(public_data, "Public_Facility_Immunisation_Index.xlsx")
-print(paste("✅ Public records:", nrow(public_data)))
+print(paste("Public records:", nrow(public_data)))
 
-# 2. CREATE PRIVATE FACILITY FILE - CORRECT CATEGORY NAME  
+# CREATE PRIVATE FACILITY FILE
 private_data <- immun %>% 
   filter(Category == "Private_Facility") %>%  # ← FIXED: underscore!
   select(District, Category, Index) %>%
   arrange(District)
 
 write_xlsx(private_data, "Private_Facility_Immunisation_Index.xlsx")
-print(paste("✅ Private records:", nrow(private_data)))
+print(paste("Private records:", nrow(private_data)))
 
 ###############################################################################
 #IMMUNISATION INDEX MAPS Rural & Urban, Public & Private
 
-###############################################################################
-# 0. Libraries
-###############################################################################
+# Libraries
 library(sf)
 library(dplyr)
 library(readxl)
 library(tmap)
 
-###############################################################################
-# 1. Read West Bengal district shapefile
-###############################################################################
+# Read West Bengal district shapefile
 wb_shp <- st_read("District_shape_West_Bengal.shp")
 
 # Check district name field
 names(wb_shp)
-# EXPECTED: NAME
 
-###############################################################################
-# 2. Read immunisation index file (by category)
-###############################################################################
+# Read immunisation index file (by category)
 immun <- read_excel("6B.District_Average_Immunisation_Index_By_Category.xlsx")
 
-# EXPECTED COLUMNS:
-# District | Category | Index
-
-###############################################################################
-# 3. District name harmonisation
-###############################################################################
+# District name harmonisation
 district_map <- c(
   "Alipurduar" = "Alipurduar",
   "Bankura" = "Bankura",
@@ -578,9 +548,7 @@ immun <- immun %>%
   mutate(DISTRICT_2011 = recode(District, !!!district_map)) %>%
   filter(!is.na(DISTRICT_2011))
 
-###############################################################################
-# 4. Aggregate indices by category
-###############################################################################
+# Aggregate indices by category
 index_wide <- immun %>%
   group_by(DISTRICT_2011, Category) %>%
   summarise(Index = mean(Index, na.rm = TRUE), .groups = "drop") %>%
@@ -589,12 +557,7 @@ index_wide <- immun %>%
     values_from = Index
   )
 
-# EXPECTED columns after pivot:
-# DISTRICT_2011 | Rural | Urban | Public_Facility | Private_Facility
-
-###############################################################################
-# 5. Merge with shapefile
-###############################################################################
+# Merge with shapefile
 wb_data <- wb_shp %>%
   left_join(index_wide, by = c("NAME" = "DISTRICT_2011")) %>%
   mutate(
@@ -604,14 +567,10 @@ wb_data <- wb_shp %>%
     Private_Facility = as.numeric(Private_Facility)
   )
 
-###############################################################################
-# 6. Static plotting mode
-###############################################################################
+# 6. Static plotting
 tmap_mode("plot")
 
-###############################################################################
-# 7. RURAL IMMUNISATION INDEX
-###############################################################################
+# RURAL IMMUNISATION INDEX
 tm_shape(wb_data) +
   tm_polygons(
     col = "Rural",
@@ -627,9 +586,7 @@ tm_shape(wb_data) +
     frame = FALSE
   )
 
-###############################################################################
-# 8. URBAN IMMUNISATION INDEX
-###############################################################################
+# URBAN IMMUNISATION INDEX
 tm_shape(wb_data) +
   tm_polygons(
     col = "Urban",
@@ -645,9 +602,7 @@ tm_shape(wb_data) +
     frame = FALSE
   )
 
-###############################################################################
-# 9. PUBLIC FACILITY IMMUNISATION INDEX
-###############################################################################
+# PUBLIC FACILITY IMMUNISATION INDEX
 tm_shape(wb_data) +
   tm_polygons(
     col = "Public_Facility",
@@ -663,9 +618,7 @@ tm_shape(wb_data) +
     frame = FALSE
   )
 
-###############################################################################
-# 10. PRIVATE FACILITY IMMUNISATION INDEX
-###############################################################################
+# PRIVATE FACILITY IMMUNISATION INDEX
 tm_shape(wb_data) +
   tm_polygons(
     col = "Private_Facility",
@@ -688,59 +641,50 @@ tm_shape(wb_data) +
 #GI* CALIBRATION — SEPARATE FOR EACH CATEGORY
 
 ###############################################################################
-# 11. Libraries
-###############################################################################
+# Libraries
 library(spdep)
 library(sf)
 library(dplyr)
 
-###############################################################################
-# 12. Function to compute Gi* safely for one variable
-###############################################################################
+# Compute Gi* for one variable
 compute_gi_star <- function(sf_data, value_col) {
   
-  # 1. Subset only non-NA values
+  # Subset only non-NA values
   sub_idx <- !is.na(sf_data[[value_col]])
   sf_sub  <- sf_data[sub_idx, ]
   
-  # 2. Neighbours and weights
+  # Neighbours and weights
   nb  <- poly2nb(sf_sub)
   lw  <- nb2listw(nb, style = "W", zero.policy = TRUE)
   
-  # 3. Compute Gi*
+  # Compute Gi*
   gi  <- localG(sf_sub[[value_col]], lw, zero.policy = TRUE)
   
-  # 4. Create full-length vector with NA
+  # Full-length vector with NA
   gi_full <- rep(NA_real_, nrow(sf_data))
   gi_full[sub_idx] <- as.numeric(gi)
   
   return(gi_full)
 }
 
-###############################################################################
-# 13. Compute Gi* separately for each category (CORRECT WAY)
-###############################################################################
+
+# Compute Gi* separately for each category
 wb_data$GiZ_Rural   <- compute_gi_star(wb_data, "Rural")
 wb_data$GiZ_Urban   <- compute_gi_star(wb_data, "Urban")
 wb_data$GiZ_Public  <- compute_gi_star(wb_data, "Public_Facility")
 wb_data$GiZ_Private <- compute_gi_star(wb_data, "Private_Facility")
 
-###############################################################################
-# 14. Check results
-###############################################################################
+# Check results
 summary(wb_data$GiZ_Rural)
 summary(wb_data$GiZ_Urban)
 summary(wb_data$GiZ_Public)
 summary(wb_data$GiZ_Private)
 
-###############################################################################
-# 15. Static plotting mode
-###############################################################################
+# Static plotting 
 library(tmap)
 tmap_mode("plot")
 
-###############################################################################
-# 16. GI* MAPS
+# GI* MAPS
 ###############################################################################
 
 # -------------------------
@@ -821,37 +765,31 @@ tm_shape(wb_data) +
 
 
 ###############################################################################
-# 17. Save Gi* values to Excel (Category-wise)
+# 17. Save Gi* values
 
-###############################################################################
-# 0. Libraries
-###############################################################################
+
+# Libraries
 library(sf)
 library(spdep)
 library(dplyr)
 library(openxlsx)
 
-###############################################################################
-# 1. Prepare spatial object (remove empty geometries)
-###############################################################################
+# Prepare spatial object
+
 wb_data_sub <- wb_data %>%
   filter(!st_is_empty(geometry))
 
-###############################################################################
-# 2. Neighbours & spatial weights (ONCE)
-###############################################################################
+# 2. Neighbours & spatial weights
 nb <- poly2nb(wb_data_sub)
 lw <- nb2listw(nb, style = "W", zero.policy = TRUE)
 
-###############################################################################
-# 3. Helper function to compute Gi* safely
-###############################################################################
+# Compute Gi*
 compute_gi <- function(sf_obj, value_col, category_name) {
   
   # Extract variable
   x <- sf_obj[[value_col]]
   
-  # Replace NA with 0 (MANDATORY for localG)
+  # Replace NA with 0
   x[is.na(x)] <- 0
   
   # Compute Gi*
@@ -874,7 +812,7 @@ compute_gi <- function(sf_obj, value_col, category_name) {
       GiSig = gi_sig
     )
   
-  # Save to Excel
+  # Save
   write.xlsx(
     out,
     paste0("GiStar_", category_name, ".xlsx"),
@@ -884,39 +822,34 @@ compute_gi <- function(sf_obj, value_col, category_name) {
   return(out)
 }
 
-###############################################################################
-# 4. Compute Gi* for each category
-###############################################################################
+# Compute Gi* for each category
 
-# ---- RURAL ----
+# RURAL
 gi_rural <- compute_gi(
   wb_data_sub,
   value_col   = "Rural",
   category_name = "Rural"
 )
 
-# ---- URBAN ----
+# URBAN
 gi_urban <- compute_gi(
   wb_data_sub,
   value_col   = "Urban",
   category_name = "Urban"
 )
 
-# ---- PUBLIC FACILITY ----
+# PUBLIC FACILITY
 gi_public <- compute_gi(
   wb_data_sub,
   value_col   = "Public_Facility",
   category_name = "Public_Facility"
 )
 
-# ---- PRIVATE FACILITY ----
+# PRIVATE FACILITY
 gi_private <- compute_gi(
   wb_data_sub,
   value_col   = "Private_Facility",
   category_name = "Private_Facility"
 )
 
-###############################################################################
-# 5. Done
-###############################################################################
 cat("Gi* analysis completed and Excel files saved successfully.\n")
